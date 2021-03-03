@@ -26,17 +26,18 @@ static void *(*rb_realloc)(void *, size_t) = alloc_emul;
 #define rb_malloc(size) rb_realloc(NULL, size)
 #define rb_free(ptr) rb_realloc(ptr, 0)
 
-static void dummy(void *lock) { (void)lock; }
+static void rb_dummy(void *lock) { (void)lock; }
 
-static void (*rb_lock)(void *) = dummy;
-static void (*rb_unlock)(void *) = dummy;
+static void (*rb_lock)(void *) = rb_dummy;
+static void (*rb_unlock)(void *) = rb_dummy;
 
 void ringbuf_setalloc(void *(*allocator)(void *, size_t)) {
   rb_realloc = allocator ? allocator : alloc_emul;
 }
+
 void ringbuf_setlock(void (*acquire)(void *), void (*release)(void *)) {
-  rb_lock = acquire ? acquire : dummy;
-  rb_unlock = release ? release : dummy;
+  rb_lock = acquire ? acquire : rb_dummy;
+  rb_unlock = release ? release : rb_dummy;
 }
 
 #ifndef min
@@ -72,7 +73,15 @@ void ringbuf_reset(ringbuf_t *rb) {
   rb_unlock(rb->lock);
 }
 
-int ringbuf_capacity(ringbuf_t *rb) { return rb->size; }
+int ringbuf_capacity(ringbuf_t *rb) {
+  int size;
+
+  rb_lock(rb->lock);
+  size = (int)rb->size;
+  rb_unlock(rb->lock);
+
+  return size;
+}
 
 int ringbuf_size(ringbuf_t *rb) {
   int size;
@@ -85,7 +94,14 @@ int ringbuf_size(ringbuf_t *rb) {
 }
 
 int ringbuf_usable(ringbuf_t *rb) {
-  return ringbuf_capacity(rb) - ringbuf_size(rb);
+  int caps, size;
+
+  rb_lock(rb->lock);
+  caps = (int)rb->size;
+  size = (int)(rb->write_pos - rb->read_pos);
+  rb_unlock(rb->lock);
+
+  return caps - size;
 }
 
 int ringbuf_read(ringbuf_t *rb, void *buffer, int size) {
